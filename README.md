@@ -13,8 +13,10 @@ kit-criptografico-python/
 ├── src/
 │   └── kit_cripto/
 │       ├── __init__.py
+│       ├── clasicos.py
 │       └── hashing.py
 ├── tests/
+│   ├── test_clasicos.py
 │   └── test_hashing.py
 └── docs/
 ```
@@ -27,8 +29,10 @@ kit-criptografico-python/
 | `requirements.txt` | Dependencias con versión exacta (`cryptography`, `pytest`) para reproducir el entorno: `pip install -r requirements.txt`. |
 | `src/kit_cripto/` | Paquete de Python con el código del kit. Está dentro de `src/` para separar el código de los tests y la documentación. |
 | `src/kit_cripto/__init__.py` | Marca la carpeta como paquete importable (`from kit_cripto import hashing`). Por ahora está vacío. |
+| `src/kit_cripto/clasicos.py` | Cifrados clásicos César y Vigenère, con fuerza bruta contra el César y análisis de frecuencias contra el Vigenère. Solo didáctico. |
 | `src/kit_cripto/hashing.py` | Módulo de hashes: calcular SHA-256 de un archivo y verificar integridad. |
 | `tests/` | Pruebas automáticas con pytest. |
+| `tests/test_clasicos.py` | Tests del módulo `clasicos.py`. |
 | `tests/test_hashing.py` | Tests del módulo `hashing.py`. |
 | `docs/` | Documentación y material de apoyo (informe TLS, imágenes de la demo ECB vs GCM). Todavía está vacía; git no versiona carpetas vacías. |
 
@@ -41,4 +45,28 @@ from kit_cripto.hashing import sha256_archivo, verificar
 
 print(sha256_archivo("documento.pdf"))
 print(verificar("documento.pdf", "b221d9db...ddb79"))  # True si coincide, False si cambió
+```
+
+## Cifrados clásicos (César y Vigenère)
+
+> **Advertencia:** son cifrados didácticos y **no sirven para proteger información real**. El módulo incluye los ataques que los rompen.
+
+`kit_cripto.clasicos` trabaja con el alfabeto A-Z, respeta mayúsculas y minúsculas y deja intactos espacios, números, signos y letras con acento. Incluye:
+
+- `cesar_cifrar` / `cesar_descifrar` y `vigenere_cifrar` / `vigenere_descifrar`.
+- `cesar_fuerza_bruta`: prueba los 26 desplazamientos. `cesar_romper` elige el más probable comparando con las frecuencias de letras del español.
+- `vigenere_romper`: estima el largo de la clave con el índice de coincidencia y recupera cada letra con chi-cuadrado contra las frecuencias del español. Necesita un texto de unos 400 caracteres o más para ser confiable.
+
+```python
+from kit_cripto.clasicos import (
+    cesar_cifrar, cesar_romper, vigenere_cifrar, vigenere_romper,
+)
+
+cesar_cifrar("Hola, mundo", 3)                  # 'Krod, pxqgr'
+
+cifrado = cesar_cifrar("Los mensajes secretos de los romanos se rompen con facilidad si uno conoce el idioma.", 5)
+cesar_romper(cifrado)                           # (5, 'Los mensajes secretos de los romanos ...')
+
+vigenere_cifrar("Ataque al amanecer", "LIMON")  # 'Lbmehp ix ozlvqqrc'
+# vigenere_romper(texto_largo_cifrado) devuelve (clave_estimada, texto_descifrado)
 ```
