@@ -14,10 +14,12 @@ kit-criptografico-python/
 │   └── kit_cripto/
 │       ├── __init__.py
 │       ├── clasicos.py
-│       └── hashing.py
+│       ├── hashing.py
+│       └── simetrico.py
 ├── tests/
 │   ├── test_clasicos.py
-│   └── test_hashing.py
+│   ├── test_hashing.py
+│   └── test_simetrico.py
 └── docs/
 ```
 
@@ -31,9 +33,11 @@ kit-criptografico-python/
 | `src/kit_cripto/__init__.py` | Marca la carpeta como paquete importable (`from kit_cripto import hashing`). Por ahora está vacío. |
 | `src/kit_cripto/clasicos.py` | Cifrados clásicos César y Vigenère, con fuerza bruta contra el César y análisis de frecuencias contra el Vigenère. Solo didáctico. |
 | `src/kit_cripto/hashing.py` | Módulo de hashes: calcular SHA-256 de un archivo y verificar integridad. |
+| `src/kit_cripto/simetrico.py` | Cifrado y descifrado de archivos con AES-256-GCM, con la clave derivada de una contraseña con scrypt. |
 | `tests/` | Pruebas automáticas con pytest. |
 | `tests/test_clasicos.py` | Tests del módulo `clasicos.py`. |
 | `tests/test_hashing.py` | Tests del módulo `hashing.py`. |
+| `tests/test_simetrico.py` | Tests del módulo `simetrico.py`. |
 | `docs/` | Documentación y material de apoyo (informe TLS, imágenes de la demo ECB vs GCM). Todavía está vacía; git no versiona carpetas vacías. |
 
 ## Hashes (SHA-256)
@@ -70,3 +74,34 @@ cesar_romper(cifrado)                           # (5, 'Los mensajes secretos de 
 vigenere_cifrar("Ataque al amanecer", "LIMON")  # 'Lbmehp ix ozlvqqrc'
 # vigenere_romper(texto_largo_cifrado) devuelve (clave_estimada, texto_descifrado)
 ```
+
+## Cifrado de archivos (AES-GCM)
+
+`kit_cripto.simetrico` cifra y descifra archivos con **AES-256-GCM** usando la librería `cryptography`. La clave no se usa directamente desde la contraseña: se deriva con **scrypt** (N=2^17, r=8, p=1) y una sal aleatoria de 16 bytes. Cada cifrado usa además un nonce aleatorio de 12 bytes. Si la contraseña es incorrecta o el archivo fue alterado, se lanza `ErrorDescifrado` y no queda ningún archivo de salida.
+
+```python
+from getpass import getpass
+from kit_cripto.simetrico import cifrar_archivo, descifrar_archivo, ErrorDescifrado
+
+contrasena = getpass("Contraseña: ")  # nunca la escribas en el código
+cifrar_archivo("notas.txt", "notas.txt.kcripto", contrasena)
+
+try:
+    descifrar_archivo("notas.txt.kcripto", "notas_recuperadas.txt", contrasena)
+except ErrorDescifrado as error:
+    print(error)  # contraseña incorrecta o archivo alterado
+```
+
+**Formato del archivo cifrado (versión 1):**
+
+| Campo | Tamaño | Detalle |
+|---|---|---|
+| Marca | 7 bytes | `KCRIPTO` |
+| Versión | 1 byte | `1` |
+| Sal | 16 bytes | Aleatoria, nueva en cada cifrado |
+| Nonce | 12 bytes | Aleatorio, nuevo en cada cifrado |
+| Texto cifrado + etiqueta | datos + 16 bytes | La etiqueta de GCM autentica todo |
+
+Los primeros 36 bytes (marca, versión, sal y nonce) se usan como datos asociados (AAD): modificar cualquiera hace fallar el descifrado.
+
+**Límites:** el archivo se procesa entero en memoria, así que no es apto para archivos muy grandes. Es un proyecto didáctico, no está auditado.
