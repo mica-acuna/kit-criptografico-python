@@ -10,6 +10,8 @@ kit-criptografico-python/
 ├── README.md
 ├── pytest.ini
 ├── requirements.txt
+├── scripts/
+│   └── demo_ecb.py
 ├── src/
 │   └── kit_cripto/
 │       ├── __init__.py
@@ -20,17 +22,20 @@ kit-criptografico-python/
 ├── tests/
 │   ├── test_asimetrico.py
 │   ├── test_clasicos.py
+│   ├── test_demo_ecb.py
 │   ├── test_hashing.py
 │   └── test_simetrico.py
 └── docs/
+    └── ecb_vs_gcm/
 ```
 
 | Ruta | Qué contiene |
 |---|---|
 | `.gitignore` | Lista de archivos que git no debe versionar: claves privadas (`*.pem`, `*.key`), variables de entorno (`.env`), caché de Python (`__pycache__/`, `.pytest_cache/`) y el entorno virtual (`.venv/`). Evita subir secretos por accidente. |
 | `README.md` | Este archivo: descripción del proyecto, aclaración de que es educativo y la organización de carpetas. |
-| `pytest.ini` | Configuración de pytest: agrega `src/` al camino de búsqueda de Python para que los tests puedan importar `kit_cripto`. |
-| `requirements.txt` | Dependencias con versión exacta (`cryptography`, `pytest`) para reproducir el entorno: `pip install -r requirements.txt`. |
+| `pytest.ini` | Configuración de pytest: agrega `src/` y `scripts/` al camino de búsqueda de Python para que los tests puedan importar `kit_cripto` y la demo. |
+| `requirements.txt` | Dependencias con versión exacta (`cryptography`, `pillow`, `pytest`) para reproducir el entorno: `pip install -r requirements.txt`. Pillow solo lo usa la demo de ECB. |
+| `scripts/demo_ecb.py` | Demo visual de por qué ECB es inseguro. Está fuera del paquete a propósito: el kit no ofrece ECB. |
 | `src/kit_cripto/` | Paquete de Python con el código del kit. Está dentro de `src/` para separar el código de los tests y la documentación. |
 | `src/kit_cripto/__init__.py` | Marca la carpeta como paquete importable (`from kit_cripto import hashing`). Por ahora está vacío. |
 | `src/kit_cripto/asimetrico.py` | Firma digital RSA-PSS con SHA-256: generar el par de claves, firmar un archivo y verificar la firma. |
@@ -40,9 +45,11 @@ kit-criptografico-python/
 | `tests/` | Pruebas automáticas con pytest. |
 | `tests/test_asimetrico.py` | Tests del módulo `asimetrico.py`. Generan sus claves en carpetas temporales, nunca en el repo. |
 | `tests/test_clasicos.py` | Tests del módulo `clasicos.py`. |
+| `tests/test_demo_ecb.py` | Tests de la demo de ECB. |
 | `tests/test_hashing.py` | Tests del módulo `hashing.py`. |
 | `tests/test_simetrico.py` | Tests del módulo `simetrico.py`. |
-| `docs/` | Documentación y material de apoyo (informe TLS, imágenes de la demo ECB vs GCM). Todavía está vacía; git no versiona carpetas vacías. |
+| `docs/` | Documentación y material de apoyo (informe TLS, demo ECB vs GCM). |
+| `docs/ecb_vs_gcm/` | Imágenes y explicación de la demo de ECB: `original.png`, `ecb.png`, `gcm.png`, `comparacion.png` y su `README.md`. |
 
 ## Hashes (SHA-256)
 
@@ -142,3 +149,17 @@ verificar_firma("contrato.txt", leer_firma("contrato.sig"), "claves/publica.pem"
 - En POSIX la clave privada se crea con permisos `0o600`. **En Windows no se aplican esos permisos:** guardá la clave en una carpeta que solo pueda leer tu usuario, y fuera de carpetas sincronizadas como OneDrive.
 
 > **Las claves no se suben al repositorio.** El `.gitignore` excluye `*.pem`, `*.key`, `*.sig` y la carpeta `claves/`. Una clave privada que llegó a GitHub se considera filtrada para siempre. Los tests generan sus claves en carpetas temporales.
+
+## Demo: por qué ECB es inseguro
+
+Se cifra una imagen con AES-256 en modo **ECB** y con **GCM**. En ECB se siguen viendo las formas del dibujo; en GCM, solo ruido. Explicación completa en [docs/ecb_vs_gcm](docs/ecb_vs_gcm/README.md).
+
+![Original, cifrada con ECB y cifrada con GCM](docs/ecb_vs_gcm/comparacion.png)
+
+Para regenerar las imágenes (necesita `pip install -r requirements.txt`):
+
+```
+python scripts/demo_ecb.py
+```
+
+> **ECB nunca se usa en sistemas reales.** Está solo en `scripts/demo_ecb.py`, fuera del paquete `kit_cripto`, con una función llamada `cifrar_ecb_inseguro`.
