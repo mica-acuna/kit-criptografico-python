@@ -1,0 +1,11 @@
+# Falsos positivos de gitleaks (regla private-key).
+#
+# En tests/test_asimetrico.py hay tests que comprueban el FORMATO de la clave privada
+# guardada: que empiece con "-----BEGIN ENCRYPTED PRIVATE KEY-----" (está cifrada) y que
+# NO contenga el encabezado de una clave sin cifrar. Son cadenas de texto de los
+# encabezados PEM; no hay ninguna clave, ni su cuerpo, en el repositorio.
+#
+# Cada línea es la huella exacta de un hallazgo, así que cualquier clave real nueva
+# se seguiría detectando.
+3b4509a09856c5521e86daa7d65cf13f0e2e0551:tests/test_asimetrico.py:private-key:56
+62f353f4c053463efd93253527639442a8e4d79b:tests/test_asimetrico.py:private-key:416
