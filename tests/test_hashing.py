@@ -110,22 +110,18 @@ def test_directorio_en_lugar_de_archivo(tmp_path):
         sha256_archivo(str(tmp_path))
 
 
-# --- Bug conocido (pendiente de decidir): ver el informe del diagnóstico ---
+# --- Hash esperado con caracteres raros o de otro tipo ---
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=TypeError,
-    reason="hmac.compare_digest no acepta str con caracteres no ASCII: debería dar False",
+@pytest.mark.parametrize(
+    "hash_raro",
+    ["ñ" * 64, HASH_ABC[:-1] + "ñ", "🔐" * 16, "İ" * 64, HASH_ABC + "ñ"],
+    ids=["enies", "enie-al-final", "emojis", "i-con-punto", "hash-correcto-mas-enie"],
 )
-def test_verificar_hash_con_caracteres_no_ascii_da_false(tmp_path):
-    assert verificar(_archivo(tmp_path, b"abc"), "ñ" * 64) is False
+def test_verificar_hash_con_caracteres_no_ascii_da_false(tmp_path, hash_raro):
+    assert verificar(_archivo(tmp_path, b"abc"), hash_raro) is False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AttributeError,
-    reason="hash_esperado=None da AttributeError en vez de un error claro (TypeError)",
-)
-def test_verificar_hash_que_no_es_texto_da_un_error_claro(tmp_path):
-    with pytest.raises(TypeError):
-        verificar(_archivo(tmp_path, b"abc"), None)
+@pytest.mark.parametrize("hash_invalido", [None, 123, b"ba7816bf", ["lista"]])
+def test_verificar_hash_que_no_es_texto_da_un_error_claro(tmp_path, hash_invalido):
+    with pytest.raises(TypeError, match="texto"):
+        verificar(_archivo(tmp_path, b"abc"), hash_invalido)
