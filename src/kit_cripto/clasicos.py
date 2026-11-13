@@ -56,6 +56,8 @@ def _normalizar(texto: str) -> str:
 
 
 def _validar_clave(clave: str) -> None:
+    if not isinstance(clave, str):
+        raise TypeError("La clave debe ser un texto.")
     if not clave:
         raise ValueError("La clave no puede estar vacía.")
     if not (clave.isascii() and clave.isalpha()):

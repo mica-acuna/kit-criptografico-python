@@ -265,13 +265,16 @@ def test_vigenere_romper_con_un_texto_largo_de_una_sola_letra_no_se_rompe():
     assert len(descifrado) == 500
 
 
-# --- Bug menor conocido (pendiente de decidir) ---
+# --- Clave que no es texto ---
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AttributeError,
-    reason="una clave que no es texto (por ejemplo un int) da AttributeError en vez de un error claro",
-)
-def test_vigenere_clave_que_no_es_texto_da_un_error_claro():
-    with pytest.raises((TypeError, ValueError)):
-        vigenere_cifrar("hola", 5)
+@pytest.mark.parametrize("clave", [5, 3.5, b"clave", ["a"], None, True])
+def test_vigenere_clave_que_no_es_texto_da_un_error_claro(clave):
+    with pytest.raises(TypeError, match="texto"):
+        vigenere_cifrar("hola", clave)
+    with pytest.raises(TypeError, match="texto"):
+        vigenere_descifrar("hola", clave)
+
+
+def test_vigenere_clave_vacia_sigue_dando_value_error_y_no_type_error():
+    with pytest.raises(ValueError, match="vacía"):
+        vigenere_cifrar("hola", "")
