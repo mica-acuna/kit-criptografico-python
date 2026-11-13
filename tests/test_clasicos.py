@@ -149,3 +149,129 @@ def test_vigenere_romper_entradas_invalidas():
         vigenere_romper("123 !!!")
     with pytest.raises(ValueError):
         vigenere_romper("hola", largo_max_clave=0)
+
+
+# --- Casos borde: texto vacío, solo signos, desplazamientos 0 y 26 ---
+
+@pytest.mark.parametrize("texto", ["", "123 ... !!! ¿¡?!", "ñáéíóú ÑÁÉÍÓÚ", "\n\t "])
+def test_texto_sin_letras_ascii_queda_intacto(texto):
+    assert cesar_cifrar(texto, 5) == texto
+    assert cesar_descifrar(texto, 5) == texto
+    assert vigenere_cifrar(texto, "CLAVE") == texto
+    assert vigenere_descifrar(texto, "CLAVE") == texto
+
+
+@pytest.mark.parametrize("desplazamiento", [0, 26, -26, 52])
+def test_cesar_con_desplazamiento_equivalente_a_cero_no_cambia_el_texto(desplazamiento):
+    assert cesar_cifrar(TEXTO_CESAR, desplazamiento) == TEXTO_CESAR
+
+
+@pytest.mark.parametrize("desplazamiento", [True, 3.5, "3", None])
+def test_cesar_rechaza_desplazamientos_que_no_son_enteros(desplazamiento):
+    with pytest.raises(TypeError):
+        cesar_cifrar("HOLA", desplazamiento)
+    with pytest.raises(TypeError):
+        cesar_descifrar("HOLA", desplazamiento)
+
+
+def test_cesar_conserva_mayusculas_y_minusculas_en_los_extremos_del_alfabeto():
+    assert cesar_cifrar("xyzXYZ abcABC", 3) == "abcABC defDEF"
+
+
+# --- Vigenère: claves de una letra, largas y mezcladas ---
+
+def test_vigenere_con_clave_de_una_letra_equivale_a_cesar():
+    assert vigenere_cifrar(TEXTO_CESAR, "D") == cesar_cifrar(TEXTO_CESAR, 3)
+    assert vigenere_descifrar(vigenere_cifrar(TEXTO_CESAR, "D"), "D") == TEXTO_CESAR
+
+
+def test_vigenere_con_clave_a_no_cambia_el_texto():
+    assert vigenere_cifrar(TEXTO_CESAR, "A") == TEXTO_CESAR
+    assert vigenere_cifrar(TEXTO_CESAR, "aaaa") == TEXTO_CESAR
+
+
+def test_vigenere_con_clave_mas_larga_que_el_texto():
+    clave = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" * 2
+    cifrado = vigenere_cifrar("Hola", clave)
+    assert cifrado == "Hpnd"  # solo usa las primeras 4 letras de la clave: A, B, C, D
+    assert vigenere_descifrar(cifrado, clave) == "Hola"
+
+
+@pytest.mark.parametrize("clave", ["limon", "LIMON", "LiMoN"])
+def test_vigenere_la_clave_es_indiferente_a_mayusculas(clave):
+    assert vigenere_cifrar("ATAQUEALAMANECER", clave) == "LBMEHPIXOZLVQQRC"
+
+
+@pytest.mark.parametrize("texto", ["a", "Zz", "Hola, mundo!", TEXTO_CESAR])
+@pytest.mark.parametrize("clave", ["A", "Z", "LIMON", "ESCUDO" * 20])
+def test_vigenere_ida_y_vuelta_con_varios_largos(texto, clave):
+    assert vigenere_descifrar(vigenere_cifrar(texto, clave), clave) == texto
+
+
+# --- Ataques con textos muy cortos o raros: no deben romperse ---
+
+def test_cesar_fuerza_bruta_con_texto_vacio_devuelve_26_candidatos_vacios():
+    assert cesar_fuerza_bruta("") == [(d, "") for d in range(26)]
+
+
+@pytest.mark.parametrize("texto", ["a", "ab", "Ola", "¡Hola!"])
+def test_cesar_romper_con_textos_cortos_devuelve_un_candidato_valido(texto):
+    desplazamiento, descifrado = cesar_romper(cesar_cifrar(texto, 7))
+    assert 0 <= desplazamiento < 26
+    assert len(descifrado) == len(texto)  # no adivina necesariamente, pero no se rompe
+
+
+@pytest.mark.parametrize("texto", ["a", "ab", "hola", "Hola, mundo!", "x" * 3])
+def test_vigenere_romper_con_textos_cortos_devuelve_clave_y_texto(texto):
+    clave, descifrado = vigenere_romper(vigenere_cifrar(texto, "CLAVE"))
+    cantidad_de_letras = sum(c.isalpha() for c in texto)
+    assert clave.isalpha() and clave.isascii() and clave.isupper()
+    assert 1 <= len(clave) <= cantidad_de_letras  # nunca más larga que las letras disponibles
+    assert len(descifrado) == len(texto)  # no adivina necesariamente, pero no se rompe
+
+
+@pytest.mark.parametrize("largo_max", [1, 2, 3])
+def test_vigenere_romper_con_largo_max_menor_que_la_clave_real_no_se_rompe(largo_max):
+    cifrado = vigenere_cifrar(TEXTO_VIGENERE, "LUNA")
+    clave, descifrado = vigenere_romper(cifrado, largo_max_clave=largo_max)
+    assert 1 <= len(clave) <= largo_max
+    assert len(descifrado) == len(TEXTO_VIGENERE)
+
+
+@pytest.mark.parametrize("largo_max", [4, 12, 50])
+def test_vigenere_romper_con_largo_max_razonable_recupera_la_clave(largo_max):
+    cifrado = vigenere_cifrar(TEXTO_VIGENERE, "LUNA")
+    assert vigenere_romper(cifrado, largo_max_clave=largo_max) == ("LUNA", TEXTO_VIGENERE)
+
+
+# Bug conocido (pendiente de decidir): con largo_max_clave muy grande respecto del texto,
+# las columnas quedan con pocas letras, el índice de coincidencia se vuelve ruidoso y se
+# elige un largo equivocado (con 767 letras: 56 con largo_max=200 y 88 con 1000).
+@pytest.mark.parametrize("largo_max", [200, 1000])
+@pytest.mark.xfail(strict=True, reason="largo_max_clave muy grande hace estimar un largo de clave equivocado")
+def test_vigenere_romper_con_largo_max_enorme_sigue_recuperando_la_clave(largo_max):
+    cifrado = vigenere_cifrar(TEXTO_VIGENERE, "LUNA")
+    assert vigenere_romper(cifrado, largo_max_clave=largo_max) == ("LUNA", TEXTO_VIGENERE)
+
+
+def test_vigenere_romper_con_texto_de_solo_signos_y_acentos_da_error():
+    with pytest.raises(ValueError, match="letras"):
+        vigenere_romper("¡¿ñáé?! 123")
+
+
+def test_vigenere_romper_con_un_texto_largo_de_una_sola_letra_no_se_rompe():
+    clave, descifrado = vigenere_romper("A" * 500)
+    assert clave.isalpha() and clave.isupper()  # solo importa que devuelva algo válido
+    assert len(descifrado) == 500
+
+
+# --- Bug menor conocido (pendiente de decidir) ---
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AttributeError,
+    reason="una clave que no es texto (por ejemplo un int) da AttributeError en vez de un error claro",
+)
+def test_vigenere_clave_que_no_es_texto_da_un_error_claro():
+    with pytest.raises((TypeError, ValueError)):
+        vigenere_cifrar("hola", 5)

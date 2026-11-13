@@ -1,4 +1,5 @@
 import os
+import random
 
 import pytest
 
@@ -45,7 +46,7 @@ def cifrado_de_referencia(tmp_path_factory, scrypt_rapido):
     [
         TEXTO,
         bytes(range(256)) * 40,
-        os.urandom(200_000),
+        random.Random(0).randbytes(200_000),  # determinista
         b"",
     ],
     ids=["texto", "binario", "grande", "vacio"],
@@ -213,6 +214,7 @@ def test_derivar_clave_ignora_la_forma_de_escribir_los_acentos():
     assert derivar_clave(compuesta, sal) == derivar_clave(descompuesta, sal)
 
 
+@pytest.mark.lento
 def test_parametros_reales_de_scrypt(tmp_path, monkeypatch):
     monkeypatch.setattr(simetrico, "_SCRYPT_N", 2**17)  # el valor de producción
     assert simetrico._SCRYPT_R == 8 and simetrico._SCRYPT_P == 1
@@ -230,3 +232,194 @@ def test_derivar_clave_valida_entradas():
         derivar_clave("", bytes(TAM_SAL))
     with pytest.raises(ValueError, match="sal"):
         derivar_clave(CONTRASENA, b"corta")
+
+
+@pytest.mark.parametrize("sal", ["a" * TAM_SAL, bytearray(TAM_SAL), None, b"", bytes(TAM_SAL + 1)])
+def test_derivar_clave_rechaza_sales_que_no_son_bytes_de_16(sal):
+    with pytest.raises(ValueError, match="sal"):
+        derivar_clave(CONTRASENA, sal)
+
+
+@pytest.mark.parametrize("contrasena", [None, 12345, b"bytes", ["lista"]])
+def test_la_contrasena_debe_ser_texto(tmp_path, contrasena):
+    original = tmp_path / "original.txt"
+    original.write_bytes(TEXTO)
+    salida = tmp_path / "salida"
+    with pytest.raises(TypeError, match="texto"):
+        cifrar_archivo(str(original), str(salida), contrasena)
+    with pytest.raises(TypeError, match="texto"):
+        descifrar_archivo(str(original), str(salida), contrasena)
+    with pytest.raises(TypeError, match="texto"):
+        derivar_clave(contrasena, bytes(TAM_SAL))
+    assert not salida.exists()
+
+
+# --- Archivos grandes ---
+
+def test_ida_y_vuelta_con_un_archivo_de_varios_megabytes(tmp_path):
+    contenido = random.Random(7).randbytes(5 * 1024 * 1024 + 123)  # no múltiplo de 16
+    original = tmp_path / "grande.bin"
+    cifrado = tmp_path / "grande.kcripto"
+    recuperado = tmp_path / "recuperado.bin"
+    original.write_bytes(contenido)
+    cifrar_archivo(str(original), str(cifrado), CONTRASENA)
+    assert cifrado.stat().st_size == LARGO_PREFIJO + len(contenido) + TAM_ETIQUETA
+    descifrar_archivo(str(cifrado), str(recuperado), CONTRASENA)
+    assert recuperado.read_bytes() == contenido
+
+
+def test_el_archivo_cifrado_vacio_mide_exactamente_el_minimo(tmp_path):
+    original = tmp_path / "vacio"
+    cifrado = tmp_path / "vacio.kcripto"
+    original.write_bytes(b"")
+    cifrar_archivo(str(original), str(cifrado), CONTRASENA)
+    assert cifrado.stat().st_size == LARGO_PREFIJO + TAM_ETIQUETA  # 52 bytes
+
+
+# --- Contraseñas con acentos, emojis y otros caracteres ---
+
+@pytest.mark.parametrize(
+    "contrasena",
+    [
+        "contraseña",
+        "pässwörd-ÄÖÜ",
+        "🔐clave🗝️",
+        "日本語のパスワード",
+        "пароль",
+        "con espacios al final   ",
+        "con\nsalto\tde línea",
+        "a",
+        "x" * 2000,
+    ],
+    ids=["enie", "dieresis", "emojis", "japones", "cirilico", "espacios", "controles", "una-letra", "larga"],
+)
+def test_ida_y_vuelta_con_contrasenas_de_todo_tipo(tmp_path, contrasena):
+    original = tmp_path / "original.txt"
+    cifrado = tmp_path / "original.kcripto"
+    recuperado = tmp_path / "recuperado.txt"
+    original.write_bytes(TEXTO)
+    cifrar_archivo(str(original), str(cifrado), contrasena)
+    descifrar_archivo(str(cifrado), str(recuperado), contrasena)
+    assert recuperado.read_bytes() == TEXTO
+
+
+def test_contrasenas_parecidas_no_abren_el_archivo(tmp_path):
+    original = tmp_path / "original.txt"
+    cifrado = tmp_path / "original.kcripto"
+    original.write_bytes(TEXTO)
+    cifrar_archivo(str(original), str(cifrado), "🔐clave🗝️")
+    for parecida in ("🔐clave🔑", "🔐clave", "🔐Clave🗝️", "🔐clave🗝️ ", " 🔐clave🗝️"):
+        with pytest.raises(ErrorDescifrado):
+            descifrar_archivo(str(cifrado), str(tmp_path / "salida"), parecida)
+    assert not (tmp_path / "salida").exists()
+
+
+def test_cifrar_con_acento_compuesto_y_descifrar_con_descompuesto(tmp_path):
+    original = tmp_path / "original.txt"
+    cifrado = tmp_path / "original.kcripto"
+    recuperado = tmp_path / "recuperado.txt"
+    original.write_bytes(TEXTO)
+    cifrar_archivo(str(original), str(cifrado), "contraseña")  # ñ en un carácter
+    descifrar_archivo(str(cifrado), str(recuperado), "contraseña")  # n + tilde
+    assert recuperado.read_bytes() == TEXTO
+
+
+# --- Archivos truncados, con encabezado inválido o con datos de más ---
+
+def _descifrar_y_comprobar_que_falla(tmp_path, contenido: bytes):
+    cifrado = tmp_path / "invalido.kcripto"
+    salida = tmp_path / "salida"
+    cifrado.write_bytes(contenido)
+    with pytest.raises(ErrorDescifrado):
+        descifrar_archivo(str(cifrado), str(salida), CONTRASENA)
+    assert not salida.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["invalido.kcripto"]  # sin temporales
+
+
+@pytest.mark.parametrize(
+    "largo",
+    [0, 1, len(MARCA), len(MARCA) + 1, LARGO_PREFIJO - 1, LARGO_PREFIJO, LARGO_PREFIJO + TAM_ETIQUETA - 1],
+    ids=["vacio", "un-byte", "solo-marca", "marca-y-version", "sin-ultimo-byte-del-nonce", "sin-datos", "sin-etiqueta-completa"],
+)
+def test_archivo_truncado_en_el_encabezado_o_la_etiqueta(tmp_path, cifrado_de_referencia, largo):
+    _descifrar_y_comprobar_que_falla(tmp_path, cifrado_de_referencia[:largo])
+
+
+@pytest.mark.parametrize("quitar", [1, 16, 17, 100])
+def test_archivo_truncado_al_final(tmp_path, cifrado_de_referencia, quitar):
+    _descifrar_y_comprobar_que_falla(tmp_path, cifrado_de_referencia[:-quitar])
+
+
+@pytest.mark.parametrize("extra", [b"\x00", b"basura al final", bytes(100)])
+def test_archivo_con_bytes_de_mas_al_final(tmp_path, cifrado_de_referencia, extra):
+    _descifrar_y_comprobar_que_falla(tmp_path, cifrado_de_referencia + extra)
+
+
+@pytest.mark.parametrize("version", [0, 2, 255])
+def test_version_no_soportada(tmp_path, cifrado_de_referencia, version):
+    contenido = bytearray(cifrado_de_referencia)
+    contenido[len(MARCA)] = version
+    _descifrar_y_comprobar_que_falla(tmp_path, bytes(contenido))
+
+
+@pytest.mark.parametrize("marca", [b"kcripto", b"KCRIPTA", b"\x00" * len(MARCA), MARCA[::-1]], ids=["minusculas", "una-letra", "ceros", "invertida"])
+def test_marca_invalida(tmp_path, cifrado_de_referencia, marca):
+    contenido = marca + cifrado_de_referencia[len(marca) :]
+    _descifrar_y_comprobar_que_falla(tmp_path, contenido)
+
+
+def test_archivo_de_texto_comun_no_se_confunde_con_uno_cifrado(tmp_path):
+    _descifrar_y_comprobar_que_falla(tmp_path, TEXTO)
+
+
+# --- Rutas problemáticas ---
+
+def test_entrada_que_es_una_carpeta(tmp_path):
+    with pytest.raises(FileNotFoundError, match="entrada"):
+        cifrar_archivo(str(tmp_path), str(tmp_path / "salida"), CONTRASENA)
+    with pytest.raises(FileNotFoundError, match="entrada"):
+        descifrar_archivo(str(tmp_path), str(tmp_path / "salida"), CONTRASENA)
+
+
+def test_salida_que_es_una_carpeta_no_deja_temporales(tmp_path):
+    original = tmp_path / "original.txt"
+    carpeta = tmp_path / "carpeta"
+    original.write_bytes(TEXTO)
+    carpeta.mkdir()
+    with pytest.raises(OSError):  # PermissionError en Windows, IsADirectoryError en POSIX
+        cifrar_archivo(str(original), str(carpeta), CONTRASENA)
+    assert carpeta.is_dir()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["carpeta", "original.txt"]
+
+
+def test_la_salida_igual_a_la_entrada_no_toca_el_archivo(tmp_path, cifrado_de_referencia):
+    cifrado = tmp_path / "datos.kcripto"
+    cifrado.write_bytes(cifrado_de_referencia)
+    with pytest.raises(ValueError, match="mismo"):
+        descifrar_archivo(str(cifrado), str(cifrado), CONTRASENA)
+    assert cifrado.read_bytes() == cifrado_de_referencia
+
+
+def test_rutas_relativas(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "original.txt").write_bytes(TEXTO)
+    cifrar_archivo("original.txt", "original.kcripto", CONTRASENA)
+    descifrar_archivo("original.kcripto", "recuperado.txt", CONTRASENA)
+    assert (tmp_path / "recuperado.txt").read_bytes() == TEXTO
+
+
+# --- Sal y nonce: nunca se repiten ---
+
+def test_veinte_cifrados_no_repiten_sal_ni_nonce(tmp_path):
+    cantidad = 20
+    original = tmp_path / "original.txt"
+    original.write_bytes(TEXTO)
+    sales, nonces = set(), set()
+    for i in range(cantidad):
+        salida = tmp_path / f"cifrado-{i}.kcripto"
+        cifrar_archivo(str(original), str(salida), CONTRASENA)
+        contenido = salida.read_bytes()
+        sales.add(contenido[len(MARCA) + 1 : len(MARCA) + 1 + TAM_SAL])
+        nonces.add(contenido[LARGO_PREFIJO - TAM_NONCE : LARGO_PREFIJO])
+    assert len(sales) == cantidad
+    assert len(nonces) == cantidad

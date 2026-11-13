@@ -10,6 +10,7 @@ kit-criptografico-python/
 ├── README.md
 ├── pytest.ini
 ├── requirements.txt
+├── requirements-dev.txt
 ├── scripts/
 │   └── demo_ecb.py
 ├── src/
@@ -31,10 +32,11 @@ kit-criptografico-python/
 
 | Ruta | Qué contiene |
 |---|---|
-| `.gitignore` | Lista de archivos que git no debe versionar: claves privadas (`*.pem`, `*.key`), variables de entorno (`.env`), caché de Python (`__pycache__/`, `.pytest_cache/`) y el entorno virtual (`.venv/`). Evita subir secretos por accidente. |
+| `.gitignore` | Lista de archivos que git no debe versionar: claves privadas (`*.pem`, `*.key`), variables de entorno (`.env`), caché de Python (`__pycache__/`, `.pytest_cache/`), los archivos de cobertura (`.coverage`, `htmlcov/`) y el entorno virtual (`.venv/`). Evita subir secretos por accidente. |
 | `README.md` | Este archivo: descripción del proyecto, aclaración de que es educativo y la organización de carpetas. |
 | `pytest.ini` | Configuración de pytest: agrega `src/` y `scripts/` al camino de búsqueda de Python para que los tests puedan importar `kit_cripto` y la demo. |
 | `requirements.txt` | Dependencias con versión exacta (`cryptography`, `pillow`, `pytest`) para reproducir el entorno: `pip install -r requirements.txt`. Pillow solo lo usa la demo de ECB. |
+| `requirements-dev.txt` | Dependencias de desarrollo: incluye `requirements.txt` más `pytest-cov` (cobertura) y `pytest-randomly` (orden aleatorio de los tests): `pip install -r requirements-dev.txt`. |
 | `scripts/demo_ecb.py` | Demo visual de por qué ECB es inseguro. Está fuera del paquete a propósito: el kit no ofrece ECB. |
 | `src/kit_cripto/` | Paquete de Python con el código del kit. Está dentro de `src/` para separar el código de los tests y la documentación. |
 | `src/kit_cripto/__init__.py` | Marca la carpeta como paquete importable (`from kit_cripto import hashing`). Por ahora está vacío. |
@@ -50,6 +52,30 @@ kit-criptografico-python/
 | `tests/test_simetrico.py` | Tests del módulo `simetrico.py`. |
 | `docs/` | Documentación y material de apoyo (informe TLS, demo ECB vs GCM). |
 | `docs/ecb_vs_gcm/` | Imágenes y explicación de la demo de ECB: `original.png`, `ecb.png`, `gcm.png`, `comparacion.png` y su `README.md`. |
+
+## Cómo correr los tests
+
+Con el entorno virtual activado (`.\.venv\Scripts\Activate.ps1` en Windows) y las dependencias de desarrollo instaladas:
+
+```
+python -m pip install -r requirements-dev.txt
+```
+
+| Qué | Comando |
+|---|---|
+| Todos los tests | `pytest` |
+| Con cobertura (muestra las líneas sin cubrir) | `pytest --cov=kit_cripto --cov=demo_ecb --cov-report=term-missing` |
+| Sin los tests lentos (scrypt y RSA con parámetros reales) | `pytest -m "not lento"` |
+| Solo los lentos | `pytest -m lento` |
+| Un solo módulo | `pytest tests/test_hashing.py` |
+| Un solo test | `pytest tests/test_hashing.py::test_vectores_conocidos` |
+| En orden fijo (sin mezclar) | `pytest -p no:randomly` |
+| Repetir un orden aleatorio que falló | `pytest -p randomly --randomly-seed=NÚMERO` (el número se muestra al inicio de cada corrida) |
+
+- Los tests **no escriben dentro del repositorio**: todo va a carpetas temporales (`tmp_path`). Las claves RSA de los tests se generan ahí y se descartan.
+- `pytest-randomly` mezcla el orden en cada corrida; así se comprueba que los tests no dependen unos de otros.
+- Los tests marcados `xfail` documentan casos conocidos que todavía no están resueltos. Si se arregla el código, pasan a `XPASS` y fallan a propósito (`strict`) para recordar que hay que quitar la marca.
+- El test de permisos `0o600` de la clave privada se saltea en Windows (solo corre en Linux y macOS).
 
 ## Hashes (SHA-256)
 

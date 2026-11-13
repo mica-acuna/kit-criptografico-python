@@ -1,13 +1,15 @@
 import inspect
 import os
+import random
 import stat
 from collections import namedtuple
 
 import pytest
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
+from kit_cripto import asimetrico
 from kit_cripto.asimetrico import (
     BITS_POR_DEFECTO,
     ErrorClave,
@@ -170,7 +172,7 @@ def test_clave_publica_de_otro_par(par, otro_par, documento):
 
 def test_documento_grande(par, tmp_path):
     grande = tmp_path / "grande.bin"
-    grande.write_bytes(os.urandom(300_000))
+    grande.write_bytes(random.Random(0).randbytes(300_000))  # determinista
     firma = firmar_archivo(str(grande), str(par.privada), CONTRASENA)
     assert verificar_firma(str(grande), firma, str(par.publica)) is True
 
@@ -244,3 +246,293 @@ def test_guardar_y_leer_firma(par, documento, tmp_path):
 def test_leer_firma_inexistente(tmp_path):
     with pytest.raises(FileNotFoundError, match="firma"):
         leer_firma(str(tmp_path / "no_existe.sig"))
+
+
+# --- Documentos vacíos y grandes ---
+
+def test_firmar_un_documento_vacio(par, tmp_path):
+    vacio = tmp_path / "vacio.txt"
+    vacio.write_bytes(b"")
+    firma = firmar_archivo(str(vacio), str(par.privada), CONTRASENA)
+    assert verificar_firma(str(vacio), firma, str(par.publica)) is True
+    vacio.write_bytes(b"x")  # agregarle un byte invalida la firma
+    assert verificar_firma(str(vacio), firma, str(par.publica)) is False
+
+
+def test_documento_de_mas_de_un_megabyte_y_un_solo_byte_cambiado(par, tmp_path):
+    contenido = bytearray(random.Random(3).randbytes(1024 * 1024 + 17))
+    grande = tmp_path / "grande.bin"
+    grande.write_bytes(bytes(contenido))
+    firma = firmar_archivo(str(grande), str(par.privada), CONTRASENA)
+    assert verificar_firma(str(grande), firma, str(par.publica)) is True
+    contenido[-1] ^= 0x01  # el último byte
+    grande.write_bytes(bytes(contenido))
+    assert verificar_firma(str(grande), firma, str(par.publica)) is False
+
+
+def test_la_firma_de_un_documento_no_sirve_para_otro(par, documento, tmp_path):
+    otro = tmp_path / "otro.txt"
+    otro.write_bytes(DOCUMENTO + b"!")
+    firma = firmar_archivo(str(documento), str(par.privada), CONTRASENA)
+    assert verificar_firma(str(otro), firma, str(par.publica)) is False
+
+
+# --- Firmas de largo o contenido incorrecto ---
+
+@pytest.mark.parametrize(
+    "transformar",
+    [
+        lambda firma: firma + b"\x00",  # un byte de más
+        lambda firma: firma[:-1],  # un byte de menos
+        lambda firma: firma * 2,
+        lambda firma: bytes(len(firma)),  # del largo correcto pero todo ceros
+        lambda firma: b"\xff" * len(firma),
+        lambda firma: firma[::-1],
+    ],
+    ids=["un-byte-de-mas", "un-byte-de-menos", "duplicada", "ceros", "unos", "invertida"],
+)
+def test_firmas_de_largo_o_contenido_incorrecto_dan_false(par, documento, transformar):
+    firma = firmar_archivo(str(documento), str(par.privada), CONTRASENA)
+    assert verificar_firma(str(documento), transformar(firma), str(par.publica)) is False
+
+
+# --- Claves públicas mal formadas ---
+
+def _pem_publico_valido(par) -> str:
+    return par.publica.read_text()
+
+
+@pytest.mark.parametrize(
+    "modificar",
+    [
+        lambda pem: "",
+        lambda pem: pem[: len(pem) // 2],  # cortada a la mitad
+        lambda pem: pem.splitlines()[0] + "\n",  # solo el encabezado
+        lambda pem: pem.replace("A", "B", 20),  # cuerpo base64 alterado
+        lambda pem: "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n",
+        lambda pem: pem.replace("PUBLIC KEY", "CERTIFICATE"),  # etiqueta de otro tipo
+    ],
+    ids=["vacia", "cortada", "solo-encabezado", "cuerpo-alterado", "cuerpo-minimo", "otra-etiqueta"],
+)
+def test_clave_publica_mal_formada(par, documento, tmp_path, modificar):
+    mala = tmp_path / "mala.pub.pem"
+    mala.write_text(modificar(_pem_publico_valido(par)))
+    with pytest.raises(ErrorClave, match="pública"):
+        verificar_firma(str(documento), bytes(256), str(mala))
+
+
+def test_clave_publica_con_codificacion_binaria_en_lugar_de_pem(par, documento, tmp_path):
+    publica = serialization.load_pem_public_key(par.publica.read_bytes())
+    der = tmp_path / "publica.der"
+    der.write_bytes(
+        publica.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    )
+    with pytest.raises(ErrorClave):
+        verificar_firma(str(documento), bytes(256), str(der))
+
+
+def test_clave_ec_como_publica_no_se_acepta(documento, tmp_path):
+    clave_ec = ec.generate_private_key(ec.SECP256R1())
+    ruta = tmp_path / "ec.pub.pem"
+    ruta.write_bytes(
+        clave_ec.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+    )
+    with pytest.raises(ErrorClave, match="RSA"):
+        verificar_firma(str(documento), bytes(256), str(ruta))
+
+
+# --- Claves privadas con contraseña errónea o mal formadas ---
+
+@pytest.mark.parametrize(
+    "contrasena",
+    [CONTRASENA + "x", CONTRASENA[:-1], CONTRASENA.upper(), " " + CONTRASENA, "a"],
+    ids=["de-mas", "de-menos", "mayusculas", "espacio-inicial", "otra"],
+)
+def test_contrasenas_parecidas_no_abren_la_clave_privada(par, documento, contrasena):
+    with pytest.raises(ErrorClave, match="contraseña incorrecta"):
+        firmar_archivo(str(documento), str(par.privada), contrasena)
+
+
+@pytest.mark.parametrize("contrasena", [None, 123, b"bytes"])
+def test_la_contrasena_debe_ser_texto(tmp_path, par, documento, contrasena):
+    with pytest.raises(TypeError, match="texto"):
+        firmar_archivo(str(documento), str(par.privada), contrasena)
+    with pytest.raises(TypeError, match="texto"):
+        generar_par_claves(str(tmp_path / "p.pem"), str(tmp_path / "p.pub.pem"), contrasena, bits=2048)
+    assert list(tmp_path.glob("*.pem")) == []
+
+
+def test_clave_privada_sin_cifrar_no_se_abre_con_contrasena(documento, tmp_path):
+    clave = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    sin_cifrar = tmp_path / "sin_cifrar.pem"
+    sin_cifrar.write_bytes(
+        clave.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    with pytest.raises(ErrorClave):
+        firmar_archivo(str(documento), str(sin_cifrar), CONTRASENA)
+
+
+def test_clave_privada_corrupta(par, documento, tmp_path):
+    pem = par.privada.read_text()
+    corrupta = tmp_path / "corrupta.pem"
+    corrupta.write_text(pem.replace("A", "B", 30))
+    with pytest.raises(ErrorClave):
+        firmar_archivo(str(documento), str(corrupta), CONTRASENA)
+    corrupta.write_text(pem[: len(pem) // 2])
+    with pytest.raises(ErrorClave):
+        firmar_archivo(str(documento), str(corrupta), CONTRASENA)
+
+
+def test_clave_ec_como_privada_no_se_acepta(documento, tmp_path):
+    clave_ec = ec.generate_private_key(ec.SECP256R1())
+    ruta = tmp_path / "ec.pem"
+    ruta.write_bytes(
+        clave_ec.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.BestAvailableEncryption(CONTRASENA.encode("utf-8")),
+        )
+    )
+    with pytest.raises(ErrorClave, match="RSA"):
+        firmar_archivo(str(documento), str(ruta), CONTRASENA)
+
+
+def test_la_clave_publica_no_sirve_para_firmar(par, documento):
+    with pytest.raises(ErrorClave):
+        firmar_archivo(str(documento), str(par.publica), CONTRASENA)
+
+
+# --- El archivo de la clave privada no filtra secretos ---
+
+def test_la_clave_privada_guardada_no_contiene_la_contrasena_ni_la_clave_en_claro(par):
+    contenido = par.privada.read_bytes()
+    assert CONTRASENA.encode("utf-8") not in contenido
+    assert b"-----BEGIN PRIVATE KEY-----" not in contenido  # sin cifrar
+    assert b"-----BEGIN RSA PRIVATE KEY-----" not in contenido
+
+
+def test_dos_pares_generados_son_distintos(par, otro_par):
+    assert par.publica.read_bytes() != otro_par.publica.read_bytes()
+    assert par.privada.read_bytes() != otro_par.privada.read_bytes()
+
+
+# --- bits: tipos y valores ---
+
+@pytest.mark.parametrize("bits", [2048.0, "2048", None, True, [2048]])
+def test_bits_que_no_son_enteros(tmp_path, bits):
+    with pytest.raises(TypeError, match="entero"):
+        generar_par_claves(str(tmp_path / "p.pem"), str(tmp_path / "p.pub.pem"), CONTRASENA, bits=bits)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_bits_negativos(tmp_path):
+    with pytest.raises(ValueError, match="2048"):
+        generar_par_claves(str(tmp_path / "p.pem"), str(tmp_path / "p.pub.pem"), CONTRASENA, bits=-1)
+
+
+@pytest.mark.lento
+def test_generar_con_los_bits_por_defecto_da_una_clave_de_3072(tmp_path):
+    privada, publica = tmp_path / "p.pem", tmp_path / "p.pub.pem"
+    generar_par_claves(str(privada), str(publica), CONTRASENA)
+    assert serialization.load_pem_public_key(publica.read_bytes()).key_size == 3072
+    documento = tmp_path / "doc.txt"
+    documento.write_bytes(DOCUMENTO)
+    firma = firmar_archivo(str(documento), str(privada), CONTRASENA)
+    assert len(firma) == 384
+    assert verificar_firma(str(documento), firma, str(publica)) is True
+
+
+# --- Guardar y leer firmas ---
+
+@pytest.mark.parametrize("firma", ["texto", bytearray(b"abc"), None, 123])
+def test_guardar_firma_exige_bytes(tmp_path, firma):
+    with pytest.raises(TypeError, match="bytes"):
+        guardar_firma(firma, str(tmp_path / "doc.sig"))
+    assert not (tmp_path / "doc.sig").exists()
+
+
+def test_guardar_firma_reemplaza_la_anterior(tmp_path):
+    ruta = tmp_path / "doc.sig"
+    guardar_firma(b"primera", str(ruta))
+    guardar_firma(b"segunda", str(ruta))
+    assert leer_firma(str(ruta)) == b"segunda"
+
+
+def test_leer_firma_de_una_carpeta(tmp_path):
+    with pytest.raises(FileNotFoundError, match="firma"):
+        leer_firma(str(tmp_path))
+
+
+def test_la_firma_guardada_conserva_todos_los_bytes(tmp_path):
+    todos = bytes(range(256))  # incluye \x00, \r, \n y \x1a, que en modo texto se alteran
+    ruta = tmp_path / "doc.sig"
+    guardar_firma(todos, str(ruta))
+    assert ruta.read_bytes() == todos
+    assert leer_firma(str(ruta)) == todos
+
+
+# --- Rutas relativas ---
+
+def test_rutas_relativas(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "claves").mkdir()
+    (tmp_path / "doc.txt").write_bytes(DOCUMENTO)
+    generar_par_claves("claves/privada.pem", "claves/publica.pem", CONTRASENA, bits=2048)
+    firma = firmar_archivo("doc.txt", "claves/privada.pem", CONTRASENA)
+    guardar_firma(firma, "doc.sig")
+    assert verificar_firma("doc.txt", leer_firma("doc.sig"), "claves/publica.pem") is True
+
+
+# --- Fallos a mitad de la escritura (simulados) ---
+
+def test_si_falla_la_escritura_no_queda_una_clave_a_medias(tmp_path, monkeypatch):
+    class ArchivoQueFalla:
+        def __init__(self, archivo):
+            self._archivo = archivo
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self._archivo.close()
+            return False
+
+        def write(self, datos):
+            raise OSError("disco lleno (simulado)")
+
+    class OsConFallo:
+        """Delega todo en `os`, salvo fdopen, que devuelve un archivo cuya escritura falla."""
+
+        def __getattr__(self, nombre):
+            return getattr(os, nombre)
+
+        @staticmethod
+        def fdopen(descriptor, modo):
+            return ArchivoQueFalla(os.fdopen(descriptor, modo))
+
+    monkeypatch.setattr(asimetrico, "os", OsConFallo())
+    with pytest.raises(OSError, match="disco lleno"):
+        generar_par_claves(str(tmp_path / "p.pem"), str(tmp_path / "p.pub.pem"), CONTRASENA, bits=2048)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_carrera_si_otro_proceso_crea_la_clave_despues_del_chequeo(tmp_path, monkeypatch):
+    """Entre el chequeo de existencia y la escritura aparece el archivo: O_EXCL lo protege."""
+    privada, publica = tmp_path / "p.pem", tmp_path / "p.pub.pem"
+    generar_real = rsa.generate_private_key
+
+    def generar_y_que_aparezca_la_privada(*args, **kwargs):
+        privada.write_bytes(b"clave de otro proceso")
+        return generar_real(*args, **kwargs)
+
+    monkeypatch.setattr(asimetrico.rsa, "generate_private_key", generar_y_que_aparezca_la_privada)
+    with pytest.raises(FileExistsError, match="sobrescribir"):
+        generar_par_claves(str(privada), str(publica), CONTRASENA, bits=2048)
+    assert privada.read_bytes() == b"clave de otro proceso"
+    assert not publica.exists()
