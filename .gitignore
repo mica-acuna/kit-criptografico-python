@@ -1,5 +1,7 @@
 *.pem
 *.key
+*.sig
+claves/
 .env
 __pycache__/
 .venv/

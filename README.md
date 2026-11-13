@@ -13,10 +13,12 @@ kit-criptografico-python/
 ├── src/
 │   └── kit_cripto/
 │       ├── __init__.py
+│       ├── asimetrico.py
 │       ├── clasicos.py
 │       ├── hashing.py
 │       └── simetrico.py
 ├── tests/
+│   ├── test_asimetrico.py
 │   ├── test_clasicos.py
 │   ├── test_hashing.py
 │   └── test_simetrico.py
@@ -31,10 +33,12 @@ kit-criptografico-python/
 | `requirements.txt` | Dependencias con versión exacta (`cryptography`, `pytest`) para reproducir el entorno: `pip install -r requirements.txt`. |
 | `src/kit_cripto/` | Paquete de Python con el código del kit. Está dentro de `src/` para separar el código de los tests y la documentación. |
 | `src/kit_cripto/__init__.py` | Marca la carpeta como paquete importable (`from kit_cripto import hashing`). Por ahora está vacío. |
+| `src/kit_cripto/asimetrico.py` | Firma digital RSA-PSS con SHA-256: generar el par de claves, firmar un archivo y verificar la firma. |
 | `src/kit_cripto/clasicos.py` | Cifrados clásicos César y Vigenère, con fuerza bruta contra el César y análisis de frecuencias contra el Vigenère. Solo didáctico. |
 | `src/kit_cripto/hashing.py` | Módulo de hashes: calcular SHA-256 de un archivo y verificar integridad. |
 | `src/kit_cripto/simetrico.py` | Cifrado y descifrado de archivos con AES-256-GCM, con la clave derivada de una contraseña con scrypt. |
 | `tests/` | Pruebas automáticas con pytest. |
+| `tests/test_asimetrico.py` | Tests del módulo `asimetrico.py`. Generan sus claves en carpetas temporales, nunca en el repo. |
 | `tests/test_clasicos.py` | Tests del módulo `clasicos.py`. |
 | `tests/test_hashing.py` | Tests del módulo `hashing.py`. |
 | `tests/test_simetrico.py` | Tests del módulo `simetrico.py`. |
@@ -105,3 +109,36 @@ except ErrorDescifrado as error:
 Los primeros 36 bytes (marca, versión, sal y nonce) se usan como datos asociados (AAD): modificar cualquiera hace fallar el descifrado.
 
 **Límites:** el archivo se procesa entero en memoria, así que no es apto para archivos muy grandes. Es un proyecto didáctico, no está auditado.
+
+## Firma digital (RSA-PSS)
+
+`kit_cripto.asimetrico` genera un par de claves RSA (3072 bits por defecto, exponente 65537), firma archivos con **RSA-PSS y SHA-256** y verifica firmas. La clave privada se guarda en PEM **cifrada con una contraseña**; la pública, en PEM. El archivo se hashea por bloques, así que no se carga entero en memoria. La firma es un archivo binario aparte (por ejemplo `contrato.sig`).
+
+```python
+from getpass import getpass
+from kit_cripto.asimetrico import (
+    generar_par_claves, firmar_archivo, verificar_firma, guardar_firma, leer_firma,
+)
+
+contrasena = getpass("Contraseña de la clave privada: ")  # nunca la escribas en el código
+
+# 1. Generar el par de claves (fuera del repositorio, o en la carpeta claves/, que está ignorada)
+generar_par_claves("claves/privada.pem", "claves/publica.pem", contrasena)
+
+# 2. Firmar un documento y guardar la firma
+firma = firmar_archivo("contrato.txt", "claves/privada.pem", contrasena)
+guardar_firma(firma, "contrato.sig")
+
+# 3. Verificar con la clave pública (esto lo puede hacer cualquiera)
+verificar_firma("contrato.txt", leer_firma("contrato.sig"), "claves/publica.pem")  # True
+
+# 4. Si alguien cambia el documento (o la firma), la verificación falla
+#    (por ejemplo, cambiar "100 unidades" por "900 unidades" en contrato.txt)
+verificar_firma("contrato.txt", leer_firma("contrato.sig"), "claves/publica.pem")  # False
+```
+
+- Una firma inválida **no lanza excepción**: devuelve `False`. Un archivo inexistente, una clave mal formada o una contraseña incorrecta sí dan un error claro (`FileNotFoundError` o `ErrorClave`).
+- `generar_par_claves` **no sobrescribe** claves existentes salvo que pases `sobrescribir=True`. Rechaza claves de menos de 2048 bits.
+- En POSIX la clave privada se crea con permisos `0o600`. **En Windows no se aplican esos permisos:** guardá la clave en una carpeta que solo pueda leer tu usuario, y fuera de carpetas sincronizadas como OneDrive.
+
+> **Las claves no se suben al repositorio.** El `.gitignore` excluye `*.pem`, `*.key`, `*.sig` y la carpeta `claves/`. Una clave privada que llegó a GitHub se considera filtrada para siempre. Los tests generan sus claves en carpetas temporales.
