@@ -27,12 +27,13 @@ kit-criptografico-python/
 │   ├── test_hashing.py
 │   └── test_simetrico.py
 └── docs/
+    ├── analisis-tls.md
     └── ecb_vs_gcm/
 ```
 
 | Ruta | Qué contiene |
 |---|---|
-| `.gitignore` | Lista de archivos que git no debe versionar: claves privadas (`*.pem`, `*.key`), variables de entorno (`.env`), caché de Python (`__pycache__/`, `.pytest_cache/`), los archivos de cobertura (`.coverage`, `htmlcov/`) y el entorno virtual (`.venv/`). Evita subir secretos por accidente. |
+| `.gitignore` | Lista de archivos que git no debe versionar: claves privadas (`*.pem`, `*.key`), variables de entorno (`.env`), caché de Python (`__pycache__/`, `.pytest_cache/`), los archivos de cobertura (`.coverage`, `htmlcov/`), las capturas de red (`*.pcap`, `*.pcapng`) y sus archivos de claves de sesión (`*keylog*`), y el entorno virtual (`.venv/`). Evita subir secretos por accidente. |
 | `README.md` | Este archivo: descripción del proyecto, aclaración de que es educativo y la organización de carpetas. |
 | `pytest.ini` | Configuración de pytest: agrega `src/` y `scripts/` al camino de búsqueda de Python para que los tests puedan importar `kit_cripto` y la demo. |
 | `requirements.txt` | Dependencias con versión exacta (`cryptography`, `pillow`, `pytest`) para reproducir el entorno: `pip install -r requirements.txt`. Pillow solo lo usa la demo de ECB. |
@@ -51,6 +52,7 @@ kit-criptografico-python/
 | `tests/test_hashing.py` | Tests del módulo `hashing.py`. |
 | `tests/test_simetrico.py` | Tests del módulo `simetrico.py`. |
 | `docs/` | Documentación y material de apoyo (informe TLS, demo ECB vs GCM). |
+| `docs/analisis-tls.md` | Informe de observación de una conexión HTTPS real con OpenSSL y Wireshark: versión, cipher suite, certificado, cadena de confianza y relación con los conceptos del kit. |
 | `docs/ecb_vs_gcm/` | Imágenes y explicación de la demo de ECB: `original.png`, `ecb.png`, `gcm.png`, `comparacion.png` y su `README.md`. |
 
 ## Cómo correr los tests
@@ -189,3 +191,9 @@ python scripts/demo_ecb.py
 ```
 
 > **ECB nunca se usa en sistemas reales.** Está solo en `scripts/demo_ecb.py`, fuera del paquete `kit_cripto`, con una función llamada `cifrar_ecb_inseguro`.
+
+## Informe: análisis de una conexión TLS real
+
+Se observó una conexión HTTPS a `example.org` con OpenSSL (y Wireshark): TLS 1.3 con AES-256-GCM, intercambio de claves híbrido post-cuántico, certificado ECDSA y cadena de confianza de 4 niveles. El informe compara TLS 1.2 con 1.3 y muestra dónde aparecen en una conexión real los conceptos del kit (SHA-256, AES-GCM, firma digital y cadena de confianza): [docs/analisis-tls.md](docs/analisis-tls.md).
+
+> Las capturas de red (`*.pcap`, `*.pcapng`) **no se suben al repositorio**: pueden contener tráfico personal. Las imágenes del informe se recortan para mostrar solo el handshake.
