@@ -244,14 +244,30 @@ def test_vigenere_romper_con_largo_max_razonable_recupera_la_clave(largo_max):
     assert vigenere_romper(cifrado, largo_max_clave=largo_max) == ("LUNA", TEXTO_VIGENERE)
 
 
-# Bug conocido (pendiente de decidir): con largo_max_clave muy grande respecto del texto,
-# las columnas quedan con pocas letras, el índice de coincidencia se vuelve ruidoso y se
-# elige un largo equivocado (con 767 letras: 56 con largo_max=200 y 88 con 1000).
-@pytest.mark.parametrize("largo_max", [200, 1000])
-@pytest.mark.xfail(strict=True, reason="largo_max_clave muy grande hace estimar un largo de clave equivocado")
+@pytest.mark.parametrize("largo_max", [200, 1000, 10**6])
 def test_vigenere_romper_con_largo_max_enorme_sigue_recuperando_la_clave(largo_max):
+    """Un límite más generoso no debe empeorar el resultado (antes elegía un largo equivocado)."""
     cifrado = vigenere_cifrar(TEXTO_VIGENERE, "LUNA")
     assert vigenere_romper(cifrado, largo_max_clave=largo_max) == ("LUNA", TEXTO_VIGENERE)
+
+
+@pytest.mark.parametrize("clave", ["ABC", "LUNA", "CIFRA", "ESCUDO"])
+@pytest.mark.parametrize("largo_max", [12, 50, 1000])
+def test_vigenere_romper_da_el_mismo_resultado_sin_importar_el_limite(clave, largo_max):
+    cifrado = vigenere_cifrar(TEXTO_VIGENERE, clave)
+    assert vigenere_romper(cifrado, largo_max_clave=largo_max) == (clave, TEXTO_VIGENERE)
+
+
+@pytest.mark.parametrize(
+    "letras, tope",
+    [(14, 1), (15, 1), (29, 1), (30, 2), (100, 6), (300, 12)],
+)
+def test_vigenere_romper_no_prueba_claves_con_menos_de_15_letras_por_columna(letras, tope):
+    texto = ("ESTE ES UN TEXTO DE PRUEBA PARA ROMPER " * 40)
+    texto = "".join(c for c in texto if c.isalpha())[:letras]
+    clave, descifrado = vigenere_romper(vigenere_cifrar(texto, "LUNA"), largo_max_clave=1000)
+    assert 1 <= len(clave) <= tope
+    assert len(descifrado) == letras
 
 
 def test_vigenere_romper_con_texto_de_solo_signos_y_acentos_da_error():

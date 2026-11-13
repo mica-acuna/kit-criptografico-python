@@ -96,7 +96,7 @@ print(verificar("documento.pdf", "b221d9db...ddb79"))  # True si coincide, False
 
 - `cesar_cifrar` / `cesar_descifrar` y `vigenere_cifrar` / `vigenere_descifrar`.
 - `cesar_fuerza_bruta`: prueba los 26 desplazamientos. `cesar_romper` elige el más probable comparando con las frecuencias de letras del español.
-- `vigenere_romper`: estima el largo de la clave con el índice de coincidencia y recupera cada letra con chi-cuadrado contra las frecuencias del español. Necesita un texto de unos 400 caracteres o más para ser confiable.
+- `vigenere_romper`: estima el largo de la clave con el índice de coincidencia y recupera cada letra con chi-cuadrado contra las frecuencias del español. Necesita un texto de unos 400 caracteres o más para ser confiable, y nunca prueba claves de más de 1/15 de las letras del texto (menos letras por columna harían el análisis poco confiable), aunque `largo_max_clave` sea mayor.
 
 ```python
 from kit_cripto.clasicos import (

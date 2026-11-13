@@ -36,6 +36,8 @@ FRECUENCIAS_ES = {
 # Un texto en español tiene un índice de coincidencia cercano a 0,075;
 # uno al azar, cercano a 1/26 (0,038).
 _TOLERANCIA_IC = 0.01
+# Con menos letras por columna, el índice de coincidencia es puro ruido y elige mal el largo.
+_LETRAS_MINIMAS_POR_COLUMNA = 15
 
 
 def _es_letra(caracter: str) -> bool:
@@ -175,14 +177,20 @@ def _desplazamiento_probable(columna: str) -> int:
 
 
 def vigenere_romper(texto_cifrado: str, largo_max_clave: int = 12) -> tuple[str, str]:
-    """Estima la clave y descifra. Devuelve (clave_estimada, texto_descifrado)."""
+    """Estima la clave y descifra. Devuelve (clave_estimada, texto_descifrado).
+
+    El largo de clave que prueba nunca supera 1/15 de las letras del texto
+    (aunque `largo_max_clave` sea mayor): con menos letras por columna el
+    análisis no es confiable.
+    """
     if largo_max_clave < 1:
         raise ValueError("largo_max_clave debe ser al menos 1.")
     # Mismas letras que consume el cifrado, para que las columnas queden alineadas.
     letras = "".join(c.upper() for c in texto_cifrado if _es_letra(c))
     if not letras:
         raise ValueError("El texto no tiene letras para analizar.")
-    largo = _estimar_largo_clave(letras, min(largo_max_clave, len(letras)))
+    tope = max(1, len(letras) // _LETRAS_MINIMAS_POR_COLUMNA)
+    largo = _estimar_largo_clave(letras, min(largo_max_clave, tope))
     clave = "".join(
         ALFABETO[_desplazamiento_probable(letras[i::largo])] for i in range(largo)
     )
